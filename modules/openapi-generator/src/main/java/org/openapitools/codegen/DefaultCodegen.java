@@ -301,6 +301,14 @@ public class DefaultCodegen implements CodegenConfig {
                 }
                 // if "x-enum-varnames" defined, update varnames
                 updateEnumVarsWithExtensions(enumVars, cm.getVendorExtensions());
+
+                // TODO only prefix if the values are numeric
+                for (Map<String, Object> enumVar : enumVars) {
+                    String name = (String) enumVar.get("name");
+                    String prefix = StringUtils.strip(cm.classname.replaceAll("([A-Z][a-z0-9]+)", "$1_"), "_");
+                    enumVar.put("name", (prefix + "_" + name).toUpperCase(Locale.ROOT));
+                }
+
                 cm.allowableValues.put("enumVars", enumVars);
             }
 
@@ -690,6 +698,14 @@ public class DefaultCodegen implements CodegenConfig {
      */
     public String toRegularExpression(String pattern) {
         return addRegularExpressionDelimiter(escapeText(pattern));
+    }
+
+    public String toPackageDirname(String name, String base) {
+        return toPackage(name, base, File.separator);
+    }
+
+    public String toPackageDirname(String name) {
+        return toPackage(name, "", File.separator);
     }
 
     /**
@@ -1290,14 +1306,7 @@ public class DefaultCodegen implements CodegenConfig {
         return " = data." + name + ";";
     }
 
-    /**
-     * returns the OpenAPI type for the property. Use getAlias to handle $ref of primitive type
-     *
-     * @param schema property schema
-     * @return string presentation of the type
-     **/
-    @SuppressWarnings("static-method")
-    public String getSchemaType(Schema schema) {
+    private Schema getComposedSchema(Schema schema) {
         // TODO better logic to handle compose schema
         if (schema instanceof ComposedSchema) { // composed schema
             ComposedSchema cs = (ComposedSchema) schema;
@@ -1312,17 +1321,47 @@ public class DefaultCodegen implements CodegenConfig {
             }
         }
 
+        return schema;
+    }
+
+    /**
+     * returns the OpenAPI type for the property. Use getAlias to handle $ref of primitive type
+     *
+     * @param schema property schema
+     * @return string presentation of the type
+     **/
+    @SuppressWarnings("static-method")
+    public String getSchemaType(Schema schema) {
+        schema = getComposedSchema(schema);
+
         if (StringUtils.isNotBlank(schema.get$ref())) { // reference to another definition/schema
             // get the schema/model name from $ref
             String schemaName = ModelUtils.getSimpleRef(schema.get$ref());
             if (StringUtils.isNotEmpty(schemaName)) {
-                return getAlias(schemaName);
+                return toBaseName(getAlias(schemaName));
             } else {
                 LOGGER.warn("Error obtaining the datatype from ref:" + schema.get$ref() + ". Default to 'object'");
                 return "object";
             }
         } else { // primitive type or model
             return getAlias(getPrimitiveType(schema));
+        }
+    }
+
+    public String getSchemaTypePackage(Schema schema) {
+        schema = getComposedSchema(schema);
+
+        if (StringUtils.isNotBlank(schema.get$ref())) { // reference to another definition/schema
+            // get the schema/model name from $ref
+            String schemaName = ModelUtils.getSimpleRef(schema.get$ref());
+            if (StringUtils.isNotEmpty(schemaName)) {
+                return toPackage(getAlias(schemaName), modelPackage);
+            } else {
+                LOGGER.warn("Error obtaining the datatype from ref:" + schema.get$ref() + ". Default to 'object'");
+                return "object";
+            }
+        } else { // primitive type or model
+            return toPackage(getAlias(getPrimitiveType(schema)), modelPackage);
         }
     }
 
@@ -1492,6 +1531,42 @@ public class DefaultCodegen implements CodegenConfig {
         return initialCaps(name) + "Api";
     }
 
+    public String toBaseName(String name) {
+        int dotPosition = name.lastIndexOf('.');
+        if (dotPosition >= 0) {
+            return name.substring(dotPosition + 1);
+        }
+
+        return name;
+    }
+
+    public String toPackage(String name) {
+        return toPackage(name, "");
+    }
+
+    public String toPackage(String name, String base) {
+        return toPackage(name, base, ".");
+    }
+
+    public String toPackage(String name, String base, String packageSeparator) {
+        String namespace = "";
+
+        int dotPosition = name.lastIndexOf('.');
+        if (dotPosition >= 0) {
+            namespace += name.substring(0, dotPosition);
+        }
+
+        namespace = namespace.replace(".", packageSeparator);
+        namespace = namespace.replace("\\", packageSeparator);
+        namespace = StringUtils.strip(namespace, packageSeparator);
+
+        if (null != base && !base.isEmpty()) {
+            namespace = StringUtils.stripEnd(base, packageSeparator) + packageSeparator + namespace;
+        }
+
+        return StringUtils.stripEnd(namespace, packageSeparator);
+    }
+
     /**
      * Output the proper model name (capitalized).
      * In case the name belongs to the TypeSystem it won't be renamed.
@@ -1524,6 +1599,8 @@ public class DefaultCodegen implements CodegenConfig {
             return null;
         }
 
+        String basename = toBaseName(name);
+
         CodegenModel m = CodegenModelFactory.newInstance(CodegenModelType.MODEL);
 
         if (reservedWords.contains(name)) {
@@ -1531,17 +1608,19 @@ public class DefaultCodegen implements CodegenConfig {
         } else {
             m.name = name;
         }
-        m.title = escapeText(schema.getTitle());
-        m.description = escapeText(schema.getDescription());
-        m.unescapedDescription = schema.getDescription();
-        m.classname = toModelName(name);
-        m.classVarName = toVarName(name);
-        m.classFilename = toModelFilename(name);
-        m.modelJson = Json.pretty(schema);
+        m.title                 = escapeText(schema.getTitle());
+        m.description           = escapeText(schema.getDescription());
+        m.unescapedDescription  = schema.getDescription();
+        m.classname             = toModelName(basename);
+        m.classVarName          = toVarName(basename);
+        m.classFilename         = toModelFilename(basename);
+        m.modelJson             = Json.pretty(schema);
         m.externalDocumentation = schema.getExternalDocs();
+
         if (schema.getExtensions() != null && !schema.getExtensions().isEmpty()) {
             m.getVendorExtensions().putAll(schema.getExtensions());
         }
+
         m.isAlias = typeAliases.containsKey(name);
         m.discriminator = createDiscriminator(name, schema, allDefinitions);
 
@@ -2251,6 +2330,11 @@ public class DefaultCodegen implements CodegenConfig {
         // remove prefix in operationId
         if (removeOperationIdPrefix) {
             int offset = operationId.indexOf('_');
+
+            if (offset < 0) {
+                offset = operationId.indexOf('.');
+            }
+
             if (offset > -1) {
                 operationId = operationId.substring(offset + 1);
             }
@@ -3980,7 +4064,8 @@ public class DefaultCodegen implements CodegenConfig {
             for (Map<String, String> enumValue : enumValues) {
                 for (Map<String, Object> enumVar : enumVars) {
                     if (enumValue.get("numericValue").equals(enumVar.get("value"))) {
-                        enumVar.put("name", enumValue.get("identifier").toUpperCase(Locale.ROOT));
+                        String name = enumValue.get("identifier").toUpperCase(Locale.ROOT);
+                        enumVar.put("name", name);
                         break;
                     }
                 }
@@ -4458,9 +4543,10 @@ public class DefaultCodegen implements CodegenConfig {
 
         String name = null;
         LOGGER.debug("Request body = " + body);
-        Schema schema = ModelUtils.getSchemaFromRequestBody(body);
-        if (StringUtils.isNotBlank(schema.get$ref())) {
-            name = ModelUtils.getSimpleRef(schema.get$ref());
+        Schema requestBodySchema = ModelUtils.getSchemaFromRequestBody(body);
+        Schema schema = requestBodySchema;
+        if (StringUtils.isNotBlank(requestBodySchema.get$ref())) {
+            name = ModelUtils.getSimpleRef(requestBodySchema.get$ref());
             schema = schemas.get(name);
         }
 
@@ -4556,7 +4642,7 @@ public class DefaultCodegen implements CodegenConfig {
                 }
                 codegenParameter.paramName = toParamName(codegenParameter.baseName);
                 codegenParameter.baseType = codegenModel.classname;
-                codegenParameter.dataType = getTypeDeclaration(codegenModel.classname);
+                codegenParameter.dataType = getTypeDeclaration(codegenModel.name);
                 codegenParameter.description = codegenModel.description;
                 imports.add(codegenParameter.baseType);
             } else {

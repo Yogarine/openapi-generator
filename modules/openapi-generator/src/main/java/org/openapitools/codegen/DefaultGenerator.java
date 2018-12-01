@@ -281,7 +281,8 @@ public class DefaultGenerator extends AbstractGenerator implements Generator {
         for (String templateName : config.modelDocTemplateFiles().keySet()) {
             String docExtension = config.getDocExtension();
             String suffix = docExtension != null ? docExtension : config.modelDocTemplateFiles().get(templateName);
-            String filename = config.modelDocFileFolder() + File.separator + config.toModelDocFilename(modelName) + suffix;
+            String filename = config.toPackageDirname(modelName, config.modelDocFileFolder()) +
+                    File.separator + config.toModelDocFilename(config.toBaseName(modelName)) + suffix;
             if (!config.shouldOverwrite(filename)) {
                 LOGGER.info("Skipped overwriting " + filename);
                 continue;
@@ -299,7 +300,8 @@ public class DefaultGenerator extends AbstractGenerator implements Generator {
     private void generateModel(List<File> files, Map<String, Object> models, String modelName) throws IOException {
         for (String templateName : config.modelTemplateFiles().keySet()) {
             String suffix = config.modelTemplateFiles().get(templateName);
-            String filename = config.modelFileFolder() + File.separator + config.toModelFilename(modelName) + suffix;
+            String filename = config.toPackageDirname(modelName, config.modelFileFolder()) +
+                    File.separator + config.toModelFilename(config.toBaseName(modelName)) + suffix;
             if (!config.shouldOverwrite(filename)) {
                 LOGGER.info("Skipped overwriting " + filename);
                 continue;
@@ -425,7 +427,8 @@ public class DefaultGenerator extends AbstractGenerator implements Generator {
                 Map<String, Schema> schemaMap = new HashMap<>();
                 schemaMap.put(name, schema);
                 Map<String, Object> models = processModels(config, schemaMap, schemas);
-                models.put("classname", config.toModelName(name));
+                models.put("package", config.toPackage(name, config.modelPackage()));
+                models.put("classname", config.toModelName(config.toBaseName(name)));
                 models.putAll(config.additionalProperties());
                 allProcessedModels.put(name, models);
             } catch (Exception e) {
@@ -1092,13 +1095,12 @@ public class DefaultGenerator extends AbstractGenerator implements Generator {
 
     private Map<String, Object> processModels(CodegenConfig config, Map<String, Schema> definitions, Map<String, Schema> allDefinitions) {
         Map<String, Object> objs = new HashMap<String, Object>();
-        objs.put("package", config.modelPackage());
         List<Object> models = new ArrayList<Object>();
         Set<String> allImports = new LinkedHashSet<String>();
         for (String key : definitions.keySet()) {
             Schema schema = definitions.get(key);
             if (schema == null)
-                throw new RuntimeException("schema cannot be null in processMoels");
+                throw new RuntimeException("schema cannot be null in processModels");
             CodegenModel cm = config.fromModel(key, schema, allDefinitions);
             Map<String, Object> mo = new HashMap<String, Object>();
             mo.put("model", cm);

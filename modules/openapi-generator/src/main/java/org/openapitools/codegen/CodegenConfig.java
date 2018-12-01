@@ -72,6 +72,12 @@ public interface CodegenConfig {
 
     String toApiVarName(String name);
 
+    String toBaseName(String name);
+
+    String toPackage(String name);
+
+    String toPackage(String name, String base);
+
     String toModelName(String name);
 
     String toParamName(String name);
@@ -151,6 +157,10 @@ public interface CodegenConfig {
     Compiler processCompiler(Compiler compiler);
 
     String sanitizeTag(String tag);
+
+    String toPackageDirname(String name);
+
+    String toPackageDirname(String name, String base);
 
     String toApiFilename(String name);
 

@@ -102,6 +102,7 @@ public abstract class AbstractPhpCodegen extends DefaultCodegen implements Codeg
                         "string",
                         "object",
                         "DateTime",
+                        "\\DateTime",
                         "mixed",
                         "number",
                         "void",
@@ -263,6 +264,11 @@ public abstract class AbstractPhpCodegen extends DefaultCodegen implements Codeg
         return packageName;
     }
 
+    @Override
+    public String toPackage(String name, String base) {
+        return toPackage(name, base, "\\");
+    }
+
     public String toSrcPath(String packageName, String basePath) {
         packageName = packageName.replace(invokerPackage, ""); // FIXME: a parameter should not be assigned. Also declare the methods parameters as 'final'.
         if (basePath != null && basePath.length() > 0) {
@@ -342,25 +348,30 @@ public abstract class AbstractPhpCodegen extends DefaultCodegen implements Codeg
 
     @Override
     public String getTypeDeclaration(Schema p) {
+        String type;
+
         if (ModelUtils.isArraySchema(p)) {
             ArraySchema ap = (ArraySchema) p;
             Schema inner = ap.getItems();
-            return getTypeDeclaration(inner) + "[]";
+            type = getTypeDeclaration(inner) + "[]";
         } else if (ModelUtils.isMapSchema(p)) {
             Schema inner = ModelUtils.getAdditionalProperties(p);
-            return getSchemaType(p) + "[string," + getTypeDeclaration(inner) + "]";
-        } else if (StringUtils.isNotBlank(p.get$ref())) { // model
-            String type = super.getTypeDeclaration(p);
-            return (!languageSpecificPrimitives.contains(type))
-                    ? "\\" + modelPackage + "\\" + type : type;
+            type = getSchemaType(p) + "[string," + getTypeDeclaration(inner) + "]";
+        } else {
+            type = super.getTypeDeclaration(p);
+
+            if (!languageSpecificPrimitives.contains(type)) {
+                type = "\\" + getSchemaTypePackage(p) + "\\" + type;
+            }
         }
-        return super.getTypeDeclaration(p);
+
+        return type;
     }
 
     @Override
     public String getTypeDeclaration(String name) {
         if (!languageSpecificPrimitives.contains(name)) {
-            return "\\" + modelPackage + "\\" + name;
+            return "\\" + toPackage(name, modelPackage) + "\\" + toBaseName(name);
         }
         return super.getTypeDeclaration(name);
     }
@@ -634,7 +645,7 @@ public abstract class AbstractPhpCodegen extends DefaultCodegen implements Codeg
             example = "new \\stdClass";
         } else if (!languageSpecificPrimitives.contains(type)) {
             // type is a model class, e.g. User
-            example = "new " + getTypeDeclaration(type) + "()";
+            example = "new " + type + "()";
         } else {
             LOGGER.warn("Type " + type + " not handled properly in setParameterExampleValue");
         }
